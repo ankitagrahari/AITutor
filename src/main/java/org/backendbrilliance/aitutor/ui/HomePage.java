@@ -13,13 +13,13 @@ import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.streams.FileUploadHandler;
 import com.vaadin.flow.server.streams.UploadHandler;
 import com.vaadin.flow.theme.lumo.LumoUtility;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.backendbrilliance.aitutor.service.ChatService;
 import org.backendbrilliance.aitutor.service.RAGService;
@@ -28,6 +28,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.file.NoSuchFileException;
 import java.time.Instant;
 import java.util.UUID;
@@ -59,7 +61,7 @@ public class HomePage extends Composite<VerticalLayout>{
         VerticalLayout mainFeatures = new VerticalLayout();
         Triple<Boolean, File, FileUploadHandler> triple = this.fileUploadHandler(mainFeatures);
         Upload docUpload = getUpload(triple.getRight());
-
+        AtomicBoolean isDocUpload = new AtomicBoolean(false);
         HorizontalLayout buttonLayout = new HorizontalLayout();
 
         //Upload All button
@@ -70,25 +72,55 @@ public class HomePage extends Composite<VerticalLayout>{
 //            docUpload.getElement().callJsFunction("uploadFiles");
 //        });
 
+        TextField sourceURL = new TextField("Source URL");
+        sourceURL.setPlaceholder("http://example.com");
+
         //Analyze the uploaded document
         Button analyzeButton = new Button("Analyze Uploaded Documents");
         analyzeButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         analyzeButton.setEnabled(triple.getLeft());
         analyzeButton.addClickListener(event -> {
             //Call the RAGService to upload the document to Vector Database.
-            ragService.uploadToVectorDB(triple.getMiddle().getName());
+            ragService.uploadToVectorDB(triple.getMiddle().getName(), sourceURL.getValue());
         });
 
         docUpload.addAllFinishedListener(event -> {
             analyzeButton.setEnabled(true);
+            isDocUpload.set(true);
+        });
+
+        sourceURL.addValueChangeListener(event -> {
+            String value = event.getValue();
+            if (value != null && !value.isEmpty()) {
+                if (isValidUrl(value)) {
+                    // Valid URL: clear any previous error
+                    sourceURL.setInvalid(false);
+                    sourceURL.setErrorMessage(null);
+                    analyzeButton.setEnabled(true);
+                    Notification.show("URL is valid: " + value, 1000, Notification.Position.BOTTOM_END);
+                } else {
+                    // Invalid URL: set an error message and mark as invalid
+                    sourceURL.setInvalid(true);
+                    sourceURL.setErrorMessage("Please enter a valid URL (e.g., http://example.com)");
+                }
+            } else {
+                // Handle empty or null case (optional: depending on whether the field is required)
+                if(isDocUpload.get()) {
+                    sourceURL.setInvalid(false);
+                    sourceURL.setErrorMessage(null);
+                } else {
+                    sourceURL.setInvalid(true);
+                    sourceURL.setErrorMessage("Either document upload or Source URL is mandatory");
+                }
+            }
         });
 
         buttonLayout.add(analyzeButton);
+        buttonLayout.add(sourceURL);
 
         mainFeatures.add(
                 docUpload, buttonLayout
         );
-
 
         Span span = new Span("Chatbot");
         Scroller scroller = new Scroller(messageList);
@@ -178,5 +210,14 @@ public class HomePage extends Composite<VerticalLayout>{
                 });
         mainFeatures.add(uploadProgress);
         return Triple.of(isUploaded.get(), dir, uploadHandler);
+    }
+
+    private boolean isValidUrl(String urlString) {
+        try {
+            new URL(urlString);
+            return true;
+        } catch (MalformedURLException e) {
+            return false;
+        }
     }
 }

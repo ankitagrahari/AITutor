@@ -2,17 +2,23 @@ package org.backendbrilliance.aitutor.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.ExtractedTextFormatter;
+import org.springframework.ai.reader.TextReader;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
+import org.springframework.ai.transformer.splitter.TextSplitter;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 
 import java.io.File;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -25,32 +31,51 @@ public class RAGService {
     private final JdbcClient jdbcClient;
     private final VectorStore vectorStore;
     private final ResourceLoader resourceLoader;
+    private final RestClient restClient;
 
-    public RAGService(JdbcClient jdbcClient, VectorStore vectorStore, ResourceLoader resourceLoader) {
+    public RAGService(JdbcClient jdbcClient, VectorStore vectorStore,
+                      ResourceLoader resourceLoader, RestClient.Builder restClientBuilder) {
         this.jdbcClient = jdbcClient;
         this.vectorStore = vectorStore;
         this.resourceLoader = resourceLoader;
+        this.restClient = restClientBuilder.build();
     }
 
-    public void uploadToVectorDB(String directoryName){
+    public void uploadToVectorDB(String directoryName, String sourceURL ) {
         //Read from directory all the files
         //Split the documents and upload to VectorStore
         //Ref https://github.com/danvega/spring-into-ai/blob/main/src/main/java/dev/danvega/rag/RagConfiguration.java
-        log.info("RAG Service processing files under directory {}", directoryName);
 
-        PdfDocumentReaderConfig readerConfig = PdfDocumentReaderConfig.builder()
-                .withPageExtractedTextFormatter(new ExtractedTextFormatter.Builder().withNumberOfBottomTextLinesToDelete(0)
-                        .withNumberOfTopPagesToSkipBeforeDelete(0)
-                        .build())
-                .withPagesPerDocument(1)
-                .build();
+        if(Objects.nonNull(sourceURL)) {
+            log.info("RAG Service processing files from URL {}", sourceURL);
+            String sourceDocStr = restClient.get()
+                    .uri(URI.create(sourceURL))
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .body(String.class);
+            log.info("URL Data: {}", sourceDocStr);
+            if(Objects.nonNull(sourceDocStr)) {
+                Document dataDoc = new Document(sourceDocStr);
+                TextSplitter splitter = new TokenTextSplitter();
+                vectorStore.accept(splitter.apply(List.of(dataDoc)));
+            }
+        } else if(Objects.nonNull(directoryName)) {
+            log.info("RAG Service processing files under directory {}", directoryName);
 
-        List<Resource> resources = getFilesUnderDirectory(directoryName);
-        resources.forEach(resource -> {
-            PagePdfDocumentReader pdfDocumentReader = new PagePdfDocumentReader(resource, readerConfig);
-            var textSplitter = new TokenTextSplitter();
-            vectorStore.accept(textSplitter.apply(pdfDocumentReader.get()));
-        });
+            PdfDocumentReaderConfig readerConfig = PdfDocumentReaderConfig.builder()
+                    .withPageExtractedTextFormatter(new ExtractedTextFormatter.Builder().withNumberOfBottomTextLinesToDelete(0)
+                            .withNumberOfTopPagesToSkipBeforeDelete(0)
+                            .build())
+                    .withPagesPerDocument(1)
+                    .build();
+
+            List<Resource> resources = getFilesUnderDirectory(directoryName);
+            resources.forEach(resource -> {
+                PagePdfDocumentReader pdfDocumentReader = new PagePdfDocumentReader(resource, readerConfig);
+                var textSplitter = new TokenTextSplitter();
+                vectorStore.accept(textSplitter.apply(pdfDocumentReader.get()));
+            });
+        }
         log.info("Document uploaded to vector store!!");
     }
 
