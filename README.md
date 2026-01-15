@@ -1,5 +1,5 @@
 ### Overview
-AI Tutor is chat bot based on the uploaded document. It strictly answer questions about the PDF uploaded and nothing else. 
+AI Tutor is chat bot based on the uploaded document or url. It strictly answer questions about the PDF uploaded and nothing else. 
 
 ### Tech Stack
 It is created by Integrating Ollama with Spring AI, using pgvector for RAG. 
